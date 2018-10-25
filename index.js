@@ -243,9 +243,12 @@ class UnionCardPay {
       const tlv = TlvFactory.parse(selectBit(55, result));
       const arpc = R.prop('value', R.filter(R.propEq('tag', '91'), tlv)[0]);
       if (arpc) res.arpc = hex2Str(arpc);
-      const scripts = R.filter(R.propEq('tag', '72'), tlv)[0].items;
-      const scriptValues = R.map(R.prop('value'), R.filter(R.propEq('tag', '86'), scripts));
-      res.scripts = R.transduce(R.map(val => hex2Str(val) + ','), R.concat, '', scriptValues).slice(0, -1);
+      const scriptItems = R.filter(R.propEq('tag', '72'), tlv)[0];
+      if (scriptItems) {
+        const scripts = scriptItems.items;
+        const scriptValues = R.map(R.prop('value'), R.filter(R.propEq('tag', '86'), scripts));
+        res.scripts = R.transduce(R.map(val => hex2Str(val) + ','), R.concat, '', scriptValues).slice(0, -1);
+      }
       const scriptId = R.prop('value', R.filter(R.propEq('tag', '9F36'), tlv)[0]);
       if (scriptId) res.scriptId = hex2Str(scriptId);
     }
