@@ -17,7 +17,8 @@ module.exports = {
   },
   "globals": {
     "PROD": true,
-    "isBrowser": true
+    "isBrowser": true,
+    "expect": true
   },
   "parser": "babel-eslint"
 }

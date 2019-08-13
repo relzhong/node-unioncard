@@ -7,6 +7,9 @@ const encode = require('./encode');
 const xor = require('buffer-xor');
 const TlvFactory = require('ber-tlv').TlvFactory;
 const { num2Str, str2Hex } = require('./encode');
+const https = require('https');
+const axios = require('axios');
+const url = require('url');
 
 class UniTaskEmitter extends EventEmitter {}
 
@@ -30,6 +33,8 @@ function createRequest(emitter) {
     }
   });
 
+  client.on('error', client.end);
+
   client.doSend = function() {
     if (!client.connecting && !client.destroyed) {
       if (client.eventEmitter) {
@@ -44,15 +49,39 @@ function createRequest(emitter) {
     client.doSend();
   });
 
-  return client;
+  client.connect(this.port, this.host);
+}
+
+function createRequestHttps(emitter) {
+  const requestUrl = url.format({
+    protocol: 'https',
+    pathname: '/mjc/webtrans/VPB_lb',
+    hostname: this.host,
+    port: this.port,
+  });
+  axios.request({
+    url: requestUrl,
+    method: 'post',
+    headers: { 'Content-Type': 'x-ISO-TPDU/x-auth',
+      Accept: '*/*',
+      'Cache-Control': 'no-cache' },
+    data: emitter.req,
+    responseType: 'arraybuffer',
+    httpsAgent: new https.Agent({ ca: this.ca, rejectUnauthorized: false }),
+  }).then(res => emitter.emit('finish', res.data));
 }
 
 
 class UnionCardPay {
-  constructor(host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, logger = console, timeout = 15000) {
+  constructor(host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, logger = console, timeout = 15000, https = false, ca = '') {
     Object.assign(this, {
-      host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, timeout, logger,
+      host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, timeout, logger, ca,
     });
+    if (https) {
+      this.createRequest = createRequestHttps.bind(this);
+    } else {
+      this.createRequest = createRequest.bind(this);
+    }
   }
 
   /**
@@ -80,12 +109,11 @@ class UnionCardPay {
     req = Buffer.concat([ head, req ]);
     this.logger.info('[unipay - register send]', parseRegister(hex2Str(req)));
     const result = await new Promise((resolve, reject) => {
-      const registerEmitter = new UniTaskEmitter();
-      registerEmitter.req = req;
-      const request = createRequest(registerEmitter);
-      request.connect(this.port, this.host);
+      const emitter = new UniTaskEmitter();
+      emitter.req = req;
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, this.timeout);
-      registerEmitter.on('finish', res => {
+      emitter.on('finish', res => {
         res = hex2Str(res);
         const result = parseRegister(res);
         this.logger.info('[unipay - register receive]', result);
@@ -153,8 +181,7 @@ class UnionCardPay {
     const result = await new Promise((resolve, reject) => {
       const emitter = new UniTaskEmitter();
       emitter.req = req;
-      const request = createRequest(emitter);
-      request.connect(this.port, this.host);
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, this.timeout);
       emitter.on('finish', res => {
         res = hex2Str(res);
@@ -223,8 +250,7 @@ class UnionCardPay {
     const result = await new Promise((resolve, reject) => {
       const emitter = new UniTaskEmitter();
       emitter.req = req;
-      const request = createRequest(emitter);
-      request.connect(this.port, this.host);
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, this.timeout);
       emitter.on('finish', res => {
         res = hex2Str(res);
@@ -301,8 +327,7 @@ class UnionCardPay {
     const result = await new Promise((resolve, reject) => {
       const emitter = new UniTaskEmitter();
       emitter.req = req;
-      const request = createRequest(emitter);
-      request.connect(this.port, this.host);
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, 5000);
       emitter.on('finish', res => {
         res = hex2Str(res);
@@ -365,8 +390,7 @@ class UnionCardPay {
     const result = await new Promise((resolve, reject) => {
       const emitter = new UniTaskEmitter();
       emitter.req = req;
-      const request = createRequest(emitter);
-      request.connect(this.port, this.host);
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, 5000);
       emitter.on('finish', res => {
         res = hex2Str(res);
@@ -422,8 +446,7 @@ class UnionCardPay {
     const result = await new Promise((resolve, reject) => {
       const emitter = new UniTaskEmitter();
       emitter.req = req;
-      const request = createRequest(emitter);
-      request.connect(this.port, this.host);
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, this.timeout);
       emitter.on('finish', res => {
         res = hex2Str(res);
@@ -483,8 +506,7 @@ class UnionCardPay {
     const result = await new Promise((resolve, reject) => {
       const emitter = new UniTaskEmitter();
       emitter.req = req;
-      const request = createRequest(emitter);
-      request.connect(this.port, this.host);
+      this.createRequest(emitter);
       const timeout = setTimeout(() => { reject(new Error('time out')); }, this.timeout);
       emitter.on('finish', res => {
         res = hex2Str(res);

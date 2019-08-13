@@ -8,7 +8,7 @@ module.exports = {
    */
   encrypt3DESECB(req, key) {
     key = Buffer.concat([ key, key.slice(0, 8) ]);
-    const iv = new Buffer(0);
+    const iv = Buffer.alloc(0);
     if (req.length % 8 !== 0) {
       throw new Error('encrypt false');
     }
@@ -25,7 +25,7 @@ module.exports = {
    * @return {Buffer} res
    */
   encryptDESECB(req, key) {
-    const iv = new Buffer(0);
+    const iv = Buffer.alloc(0);
     if (req.length % 8 !== 0) {
       throw new Error('encrypt false');
     }
@@ -42,7 +42,7 @@ module.exports = {
    * @return {Buffer} res
    */
   decryptDESECB(req, key) {
-    const iv = new Buffer(0);
+    const iv = Buffer.alloc(0);
     if (req.length % 8 !== 0) {
       throw new Error('encrypt false');
     }
@@ -60,7 +60,7 @@ module.exports = {
    */
   decrypt3DESECB(req, key) {
     key = Buffer.concat([ key, key.slice(0, 8) ]);
-    const iv = new Buffer(0);
+    const iv = Buffer.alloc(0);
     if (req.length % 8 !== 0) {
       throw new Error('encrypt false');
     }
