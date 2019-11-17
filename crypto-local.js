@@ -1,5 +1,7 @@
 const crypto = require('crypto');
-module.exports = {
+const xor = require('buffer-xor');
+
+const cryptoLocal = {
   /**
    * 3DES-ECB加密
    * @param {String} req 入参
@@ -70,4 +72,21 @@ module.exports = {
     ciph = Buffer.concat([ ciph, cipher.final() ]);
     return ciph;
   },
+  /**
+     * 计算MAC
+     * @param {Buffer} req 请求Buffer
+     * @param {Buffer} key 密钥
+     * @return {Buffer} mac
+     */
+  calcMac(req, key) {
+    let res = Buffer.alloc(8);
+    req = Buffer.concat([ req ], req.length % 8 ? req.length + 8 - req.length % 8 : req.length);
+    for (let i = 0; i < req.length / 8; i++) {
+      res = xor(res, req.slice(i * 8, (i + 1) * 8));
+      res = cryptoLocal.encryptDESECB(res, key);
+    }
+    return res;
+  },
 };
+
+module.exports = cryptoLocal;

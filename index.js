@@ -2,9 +2,9 @@ const EventEmitter = require('events');
 const R = require('ramda');
 const net = require('net');
 const Decimal = require('decimal.js');
-const crypto = require('./crypto');
+const cryptoLocal = require('./crypto-local');
+const cryptoProxy = require('./crypto-proxy');
 const encode = require('./encode');
-const xor = require('buffer-xor');
 const TlvFactory = require('ber-tlv').TlvFactory;
 const { num2Str, str2Hex } = require('./encode');
 const https = require('https');
@@ -73,14 +73,19 @@ function createRequestHttps(emitter) {
 
 
 class UnionCardPay {
-  constructor(host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, logger = console, timeout = 15000, https = false, ca = '') {
+  constructor(host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, logger = console, timeout = 15000, https = false, ca = '', cryptoProxyHost) {
     Object.assign(this, {
-      host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, timeout, logger, ca,
+      host, port, tpdu, posId, deviceId, batchNo, primaryKey, deviceNo, timeout, logger, ca, cryptoProxyHost,
     });
     if (https) {
       this.createRequest = createRequestHttps.bind(this);
     } else {
       this.createRequest = createRequest.bind(this);
+    }
+    if (cryptoProxyHost) {
+      this.crypto = cryptoProxy(cryptoProxyHost);
+    } else {
+      this.crypto = cryptoLocal;
     }
   }
 
@@ -91,7 +96,7 @@ class UnionCardPay {
   async register() {
     const { str2Hex, hex2Str, str2Buf } = encode;
     const { parseRegister, selectBit } = UnionCardPay;
-    const decrypt3DESECB = crypto.decrypt3DESECB;
+    const decrypt3DESECB = this.crypto.decrypt3DESECB;
     const reqParams = [];
     reqParams.push(str2Hex(this.tpdu)); // tpdu
     reqParams.push(str2Hex('603100310208')); // 报文头
@@ -127,8 +132,14 @@ class UnionCardPay {
     if (selectBit(39, result) === '3030') {
       const keys = selectBit(62, result);
       if (keys && keys.length === 64) {
-        res.pKey = hex2Str(decrypt3DESECB(keys.slice(0, 32), str2Hex(this.primaryKey)));
-        res.mKey = hex2Str(decrypt3DESECB(keys.slice(40, 56), str2Hex(this.primaryKey)));
+        if (this.cryptoProxyHost) {
+          this.logger.info('[unipay - register emit remote register]', await this.crypto.register(keys));
+          res.pKey = '30303030303030303030303030303030';
+          res.mKey = '3030303030303030';
+        } else {
+          res.pKey = hex2Str(decrypt3DESECB(keys.slice(0, 32), str2Hex(this.primaryKey)));
+          res.mKey = hex2Str(decrypt3DESECB(keys.slice(40, 56), str2Hex(this.primaryKey)));
+        }
       }
     }
     if (selectBit(60, result)) {
@@ -149,8 +160,8 @@ class UnionCardPay {
    */
   async trade(serialNo, track2, track3, password, price) {
     const { calcLLLVar, calcLLVar, str2Hex, hex2Str, str2Buf } = encode;
-    const { parseRegister, calcMac, selectBit } = UnionCardPay;
-    const { encrypt3DESECB } = crypto;
+    const { parseRegister, selectBit } = UnionCardPay;
+    const { encrypt3DESECB, calcMac } = this.crypto;
     const reqParams = [];
     reqParams.push(str2Hex(this.tpdu)); // tpdu
     reqParams.push(str2Hex('603100310208')); // 报文头
@@ -167,12 +178,12 @@ class UnionCardPay {
     reqParams.push(str2Buf(this.deviceId)); // 受卡机终端标识码
     reqParams.push(str2Buf(this.posId)); // 受卡方标识码(商户代码)
     reqParams.push(str2Buf('156')); // 交易货币代码
-    reqParams.push(encrypt3DESECB(password, str2Hex(this.pKey))); // 个人标识码数据
+    reqParams.push(await encrypt3DESECB(password, str2Hex(this.pKey))); // 个人标识码数据
     reqParams.push(str2Hex('1600000000000000')); // 安全控制信息
     reqParams.push(str2Hex('001622' + this.batchNo + '00000052')); // 自定义域
 
     let req = Buffer.concat(reqParams);
-    const mac = calcMac(req.slice(11), str2Hex(this.mKey));
+    const mac = await calcMac(req.slice(11), str2Hex(this.mKey));
     req = Buffer.concat([ req, mac ]);
     const head = Buffer.alloc(2);
     head.writeUIntBE(req.length, 0, 2);
@@ -215,8 +226,8 @@ class UnionCardPay {
      */
   async tradeIC(serialNo, icCardNo, icTags, track2, track3, password, price, csn) {
     const { calcLLVar, calcLLLVar, str2Hex, hex2Str, str2Buf } = encode;
-    const { parseRegister, calcMac, selectBit, prepareARQCTags } = UnionCardPay;
-    const { encrypt3DESECB } = crypto;
+    const { parseRegister, selectBit, prepareARQCTags } = UnionCardPay;
+    const { encrypt3DESECB, calcMac } = this.crypto;
     const reqParams = [];
     reqParams.push(str2Hex(this.tpdu)); // tpdu
     reqParams.push(str2Hex('603100310208')); // 报文头
@@ -236,12 +247,12 @@ class UnionCardPay {
     reqParams.push(str2Buf(this.posId)); // 受卡方标识码(商户代码)
     // reqParams.push(str2Hex('003150414432303632302020202020202020202020202020202030303030303023')); // 48
     reqParams.push(str2Buf('156')); // 交易货币代码
-    reqParams.push(encrypt3DESECB(password, str2Hex(this.pKey))); // 个人标识码数据
+    reqParams.push(await encrypt3DESECB(password, str2Hex(this.pKey))); // 个人标识码数据
     reqParams.push(str2Hex('1600000000000000')); // 安全控制信息
     reqParams.push(prepareARQCTags(icTags.secret, icTags.issuerInfo, icTags.unPredictCode, icTags.counter, icTags.tradeDate, price, str2Buf(this.deviceNo), str2Hex(serialNo, 4, 1))); // IC卡数据域
     reqParams.push(str2Hex('001622' + this.batchNo + '00000050')); // 自定义域
     let req = Buffer.concat(reqParams);
-    const mac = calcMac(req.slice(11), str2Hex(this.mKey));
+    const mac = await calcMac(req.slice(11), str2Hex(this.mKey));
     req = Buffer.concat([ req, mac ]);
     const head = Buffer.alloc(2);
     head.writeUIntBE(req.length, 0, 2);
@@ -295,7 +306,8 @@ class UnionCardPay {
      */
   async reversalIC(preSerialNo, icTags, track2, track3, price, csn, preTradeDate, preBatchNo) {
     const { str2Hex, hex2Str, str2Buf, calcLLVar, calcLLLVar } = encode;
-    const { parseRegister, calcMac, selectBit, prepareReversalTags } = UnionCardPay;
+    const { parseRegister, selectBit, prepareReversalTags } = UnionCardPay;
+    const { calcMac } = this.crypto;
     const reqParams = [];
     reqParams.push(str2Hex(this.tpdu)); // tpdu
     reqParams.push(str2Hex('603100310208')); // 报文头
@@ -318,7 +330,7 @@ class UnionCardPay {
     reqParams.push(str2Hex('0029'), str2Buf(preBatchNo + preSerialNo + preTradeDate + '0000000000000', 29)); // 61自定义域
 
     let req = Buffer.concat(reqParams);
-    const mac = calcMac(req.slice(11), str2Hex(this.mKey));
+    const mac = await calcMac(req.slice(11), str2Hex(this.mKey));
     req = Buffer.concat([ req, mac ]);
     const head = Buffer.alloc(2);
     head.writeUIntBE(req.length, 0, 2);
@@ -358,7 +370,8 @@ class UnionCardPay {
    */
   async refundIC(serialNo, icCardNo, track2, track3, price, csn, preTradeDate, retrievalNo, preSerialNo, preBatchNo) {
     const { str2Hex, hex2Str, str2Buf, calcLLVar, calcLLLVar } = encode;
-    const { parseRegister, calcMac, selectBit } = UnionCardPay;
+    const { parseRegister, selectBit } = UnionCardPay;
+    const { calcMac } = this.crypto;
     const reqParams = [];
     reqParams.push(str2Hex(this.tpdu)); // tpdu
     reqParams.push(str2Hex('603100310208')); // 报文头
@@ -381,7 +394,7 @@ class UnionCardPay {
     reqParams.push(str2Hex('0029'), str2Buf(preBatchNo + preSerialNo + preTradeDate + '0000000000000', 29)); // 61自定义域
 
     let req = Buffer.concat(reqParams);
-    const mac = calcMac(req.slice(11), str2Hex(this.mKey));
+    const mac = await calcMac(req.slice(11), str2Hex(this.mKey));
     req = Buffer.concat([ req, mac ]);
     const head = Buffer.alloc(2);
     head.writeUIntBE(req.length, 0, 2);
@@ -476,7 +489,8 @@ class UnionCardPay {
    */
   async scriptNotify(serialNo, icCardNo, icTags, price, csn, preTradeDate, retrievalNo, preSerialNo, preBatchNo) {
     const { calcLLVar, str2Hex, hex2Str, str2Buf } = encode;
-    const { parseRegister, calcMac, selectBit, prepareScriptNotifyTags } = UnionCardPay;
+    const { parseRegister, selectBit, prepareScriptNotifyTags } = UnionCardPay;
+    const { calcMac } = this.crypto;
     const reqParams = [];
     reqParams.push(str2Hex(this.tpdu)); // tpdu
     reqParams.push(str2Hex('603100310208')); // 报文头
@@ -497,7 +511,7 @@ class UnionCardPay {
     reqParams.push(str2Hex('001622' + preBatchNo + '95100050')); // 自定义域
     reqParams.push(str2Hex('0029'), str2Buf(preBatchNo + preSerialNo + preTradeDate + '0000000000000', 29));
     let req = Buffer.concat(reqParams);
-    const mac = calcMac(req.slice(11), str2Hex(this.mKey));
+    const mac = await calcMac(req.slice(11), str2Hex(this.mKey));
     req = Buffer.concat([ req, mac ]);
     const head = Buffer.alloc(2);
     head.writeUIntBE(req.length, 0, 2);
@@ -623,22 +637,6 @@ class UnionCardPay {
      */
   static selectBit(bit, req) {
     return R.prop('data', R.filter(R.propEq('bit', bit), req)[0]);
-  }
-
-  /**
-     * 计算MAC
-     * @param {Buffer} req 请求Buffer
-     * @param {Buffer} key 密钥
-     * @return {Buffer} mac
-     */
-  static calcMac(req, key) {
-    let res = Buffer.alloc(8);
-    req = Buffer.concat([ req ], req.length % 8 ? req.length + 8 - req.length % 8 : req.length);
-    for (let i = 0; i < req.length / 8; i++) {
-      res = xor(res, req.slice(i * 8, (i + 1) * 8));
-      res = crypto.encryptDESECB(res, key);
-    }
-    return res;
   }
 
   /**
